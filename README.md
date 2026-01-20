@@ -45,44 +45,38 @@ Question → Similarity Search → Gemini → Answer
 
 ## 📁 Project Structure
 pdfchat/
+├── backend/
+│   ├── main.py
+│   ├── rag.py
+│   ├── supabase_client.py
+│   ├── requirements.txt
+│   ├── .env
+│   ├── venv/
+│   └── __pycache__/
 │
-├── backend/                         # 🧠 Python RAG Backend
-│   │
-│   ├── main.py                      # FastAPI entry point
-│   ├── rag.py                       # RAG logic (LangChain + Gemini)
-│   ├── supabase_client.py           # Supabase connection
-│   ├── requirements.txt             # Python dependencies
-│   ├── .env                         # 🔐 API keys (NOT committed)
-│   ├── venv/                        # Python virtual environment
-│   │
-│   └── __pycache__/                 # Python cache (auto-generated)
-│
-├── frontend/                        # 🎨 Next.js Frontend
-│   │
+├── frontend/
 │   ├── app/
-│   │   ├── page.jsx                 # Main UI page
-│   │   ├── layout.jsx               # Root layout
-│   │   └── globals.css              # Global styles
+│   │   ├── page.jsx
+│   │   ├── layout.jsx
+│   │   └── globals.css
 │   │
 │   ├── components/
-│   │   ├── PdfUploader.jsx          # PDF upload component
-│   │   └── ChatBox.jsx              # Chat UI component
+│   │   ├── PdfUploader.jsx
+│   │   └── ChatBox.jsx
 │   │
 │   ├── lib/
-│   │   └── api.js                   # Backend API calls
+│   │   └── api.js
 │   │
 │   ├── public/
-│   │   ├── favicon.ico
-│   │   └── (static assets)
+│   │   └── favicon.ico
 │   │
 │   ├── package.json
 │   ├── package-lock.json
 │   ├── tailwind.config.js
 │   ├── postcss.config.js
-│   ├── components.json              # shadcn/ui config
+│   ├── components.json
 │   └── node_modules/
 │
-├── .gitignore                       # Ignore venv, node_modules, .env
-├── README.md                        # Project documentation
-└── sample.pdf                       # Test PDF (optional)
-
+├── .gitignore
+├── README.md
+└── sample.pdf
