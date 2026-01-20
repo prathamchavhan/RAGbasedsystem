@@ -44,4 +44,39 @@ Question → Similarity Search → Gemini → Answer
 ---
 
 ## 📁 Project Structure
-<pre> pdfchat/ ├── backend/ │ ├── main.py │ ├── rag.py │ ├── supabase_client.py │ ├── requirements.txt │ ├── .env │ ├── venv/ │ └── __pycache__/ │ ├── frontend/ │ ├── app/ │ │ ├── page.jsx │ │ ├── layout.jsx │ │ └── globals.css │ │ │ ├── components/ │ │ ├── PdfUploader.jsx │ │ └── ChatBox.jsx │ │ │ ├── lib/ │ │ └── api.js │ │ │ ├── public/ │ │ └── favicon.ico │ │ │ ├── package.json │ ├── package-lock.json │ ├── tailwind.config.js │ ├── postcss.config.js │ ├── components.json │ └── node_modules/ │ ├── .gitignore ├── README.md └── sample.pdf </pre>
+    pdfchat/
+    ├── backend/
+    │   ├── main.py
+    │   ├── rag.py
+    │   ├── supabase_client.py
+    │   ├── requirements.txt
+    │   ├── .env
+    │   ├── venv/
+    │   └── __pycache__/
+    │
+    ├── frontend/
+    │   ├── app/
+    │   │   ├── page.jsx
+    │   │   ├── layout.jsx
+    │   │   └── globals.css
+    │   │
+    │   ├── components/
+    │   │   ├── PdfUploader.jsx
+    │   │   └── ChatBox.jsx
+    │   │
+    │   ├── lib/
+    │   │   └── api.js
+    │   │
+    │   ├── public/
+    │   │   └── favicon.ico
+    │   │
+    │   ├── package.json
+    │   ├── package-lock.json
+    │   ├── tailwind.config.js
+    │   ├── postcss.config.js
+    │   ├── components.json
+    │   └── node_modules/
+    │
+    ├── .gitignore
+    ├── README.md
+    └── sample.pdf
