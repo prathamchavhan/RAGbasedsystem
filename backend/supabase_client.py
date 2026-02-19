@@ -16,3 +16,9 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("Supabase ENV variables not loaded")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+def get_auth_client(token: str):
+    client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    if token:
+        client.options.headers["Authorization"] = f"Bearer {token}"
+    return client
