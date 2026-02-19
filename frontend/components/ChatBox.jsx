@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { askQuestion } from "@/lib/api";
 
-export default function ChatBox() {
+export default function ChatBox({ projectId, token }) {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(false);
@@ -13,7 +13,7 @@ export default function ChatBox() {
   const handleAsk = async () => {
     if (!question) return;
     setLoading(true);
-    const res = await askQuestion(question);
+    const res = await askQuestion(question, projectId, token);
     setAnswer(res.answer);
     setLoading(false);
   };

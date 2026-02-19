@@ -4,15 +4,16 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { uploadPDF } from "@/lib/api";
 
-export default function PdfUploader() {
+export default function PdfUploader({ projectId, token, onUploadSuccess }) {
   const [file, setFile] = useState(null);
   const [status, setStatus] = useState("");
 
   const handleUpload = async () => {
     if (!file) return;
     setStatus("Uploading...");
-    await uploadPDF(file);
+    await uploadPDF(file, projectId, token);
     setStatus("PDF indexed successfully");
+    if (onUploadSuccess) onUploadSuccess();
   };
 
   return (
