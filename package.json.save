@@ -1,0 +1,27 @@
+
+  "backend": "cd backend && source venv/bin/activate && uvicorn main:app --reload",
+  "frontend": "cd frontend && npm run dev",
+  "dev": "concurrently \"npm run backend\" \"npm run frontend\""
+}
+{
+  "name": "pdfchat",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prathamchavhan/pdfchatapp.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/prathamchavhan/pdfchatapp/issues"
+  },
+  "homepage": "https://github.com/prathamchavhan/pdfchatapp#readme",
+  "devDependencies": {
+    "concurrently": "^9.2
