@@ -1,32 +1,47 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { auth, db, storage, googleProvider } from "@/lib/firebase";
+import {
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged,
+} from "firebase/auth";
+import {
+  collection,
+  addDoc,
+  query,
+  where,
+  getDocs,
+  serverTimestamp,
+} from "firebase/firestore";
+import { ref, getBlob } from "firebase/storage";
 import PdfUploader from "@/components/PdfUploader";
 import ChatBox from "@/components/ChatBox";
 import { Button } from "@/components/ui/button";
 
 export default function Home() {
-  const [session, setSession] = useState(null);
+  const [user, setUser] = useState(null);
+  const [idToken, setIdToken] = useState(null);
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [newProjectName, setNewProjectName] = useState("");
   const [projectFiles, setProjectFiles] = useState([]);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session) fetchProjects();
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setUser(firebaseUser);
+      if (firebaseUser) {
+        const token = await firebaseUser.getIdToken();
+        setIdToken(token);
+        fetchProjects(firebaseUser.uid);
+      } else {
+        setIdToken(null);
+        setProjects([]);
+        setSelectedProject(null);
+      }
     });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session) fetchProjects();
-    });
-
-    return () => subscription.unsubscribe();
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -37,73 +52,95 @@ export default function Home() {
     }
   }, [selectedProject]);
 
-  const fetchProjects = async () => {
-    const { data } = await supabase.from("projects").select("*").order("created_at", { ascending: false });
-    setProjects(data || []);
+  const fetchProjects = async (uid) => {
+    try {
+      const q = query(
+        collection(db, "projects"),
+        where("user_id", "==", uid)
+      );
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() }))
+        .sort((a, b) => {
+          // Sort by created_at descending (newest first) client-side
+          const aTime = a.created_at?.seconds ?? 0;
+          const bTime = b.created_at?.seconds ?? 0;
+          return bTime - aTime;
+        });
+      setProjects(data);
+    } catch (err) {
+      console.error("fetchProjects error:", err);
+    }
   };
 
   const fetchFiles = async (projectId) => {
-    // We only need the filenames, and we want them distinct
-    // Supabase JS doesn't have a distinct query builder out of the box for this
-    // but we can just group by in JS or select all filenames and deduplicate
-    const { data } = await supabase
-      .from("pdf_docs")
-      .select("filename")
-      .eq("project_id", projectId);
-
-    if (data) {
-      const uniqueFiles = [...new Set(data.map(d => d.filename))];
-      setProjectFiles(uniqueFiles);
-    }
+    const q = query(
+      collection(db, "pdf_docs"),
+      where("project_id", "==", projectId),
+      where("user_id", "==", user.uid)
+    );
+    const snapshot = await getDocs(q);
+    const filenames = snapshot.docs.map((doc) => doc.data().filename);
+    const uniqueFiles = [...new Set(filenames)];
+    setProjectFiles(uniqueFiles);
   };
 
   const handleDownload = async (filename) => {
-    const { data, error } = await supabase.storage
-      .from("pdfs")
-      .download(`${session.user.id}/${selectedProject.id}/${filename}`);
-
-    if (error) {
+    try {
+      const storagePath = `${user.uid}/${selectedProject.id}/${filename}`;
+      const fileRef = ref(storage, storagePath);
+      const blob = await getBlob(fileRef);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+    } catch (error) {
       console.error("Download error:", error);
-      alert("Error downloading file. It might not be in the new storage bucket yet.");
-      return;
+      alert("Error downloading file.");
     }
-
-    // Create a Blob URL and trigger download
-    const url = URL.createObjectURL(data);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    window.URL.revokeObjectURL(url);
-    a.remove();
   };
 
   const createProject = async () => {
     if (!newProjectName.trim()) return;
-    const { data, error } = await supabase
-      .from("projects")
-      .insert([{ name: newProjectName, user_id: session.user.id }])
-      .select()
-      .single();
-
-    if (data) {
-      setProjects([data, ...projects]);
+    try {
+      const docRef = await addDoc(collection(db, "projects"), {
+        name: newProjectName,
+        user_id: user.uid,
+        created_at: serverTimestamp(),
+      });
+      const newProject = { id: docRef.id, name: newProjectName, user_id: user.uid };
+      setProjects([newProject, ...projects]);
       setNewProjectName("");
-      setSelectedProject(data);
+      setSelectedProject(newProject);
+    } catch (err) {
+      console.error("createProject error:", err);
+      alert("Failed to create project: " + err.message);
     }
   };
 
   const loginWithGoogle = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: window.location.origin,
-      },
-    });
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (error) {
+      console.error("Login error:", error);
+    }
   };
 
-  if (!session) {
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
+
+  // Refresh ID token for API calls (tokens expire after 1 hour)
+  const getToken = async () => {
+    if (!user) return null;
+    return await user.getIdToken();
+  };
+
+  if (!user) {
     return (
       <main className="max-w-md mx-auto p-8 mt-20 text-center space-y-6">
         <h1 className="text-3xl font-bold">📄 PDF Chat App</h1>
@@ -119,7 +156,7 @@ export default function Home() {
       <div className="space-y-6 md:border-r pr-6">
         <div className="flex justify-between items-center">
           <h2 className="text-xl font-bold">Projects</h2>
-          <Button variant="outline" size="sm" onClick={() => supabase.auth.signOut()}>Logout</Button>
+          <Button variant="outline" size="sm" onClick={handleLogout}>Logout</Button>
         </div>
 
         <div className="flex gap-2">
@@ -137,7 +174,9 @@ export default function Home() {
           {projects.map((p) => (
             <li key={p.id}>
               <button
-                className={`w-full text-left p-3 rounded-md transition-colors ${selectedProject?.id === p.id ? "bg-primary text-primary-foreground font-medium" : "bg-muted/50 hover:bg-muted"
+                className={`w-full text-left p-3 rounded-md transition-colors ${selectedProject?.id === p.id
+                  ? "bg-primary text-primary-foreground font-medium"
+                  : "bg-muted/50 hover:bg-muted"
                   }`}
                 onClick={() => setSelectedProject(p)}
               >
@@ -145,7 +184,9 @@ export default function Home() {
               </button>
             </li>
           ))}
-          {projects.length === 0 && <p className="text-sm text-gray-500 text-center py-4">No projects yet.</p>}
+          {projects.length === 0 && (
+            <p className="text-sm text-gray-500 text-center py-4">No projects yet.</p>
+          )}
         </ul>
       </div>
 
@@ -159,7 +200,9 @@ export default function Home() {
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="border-b pb-4">
               <h2 className="text-3xl font-bold">{selectedProject.name}</h2>
-              <p className="text-sm text-gray-500 mt-1">Upload PDFs and ask questions specifically for this project.</p>
+              <p className="text-sm text-gray-500 mt-1">
+                Upload PDFs and ask questions specifically for this project.
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-6">
@@ -167,31 +210,42 @@ export default function Home() {
                 <h3 className="font-semibold mb-4">Chat Context</h3>
                 {projectFiles.length > 0 ? (
                   <ul className="space-y-2 mb-6">
-                    {projectFiles.map(file => (
-                      <li key={file} className="text-sm bg-muted/50 p-2 rounded flex items-center justify-between gap-2">
+                    {projectFiles.map((file) => (
+                      <li
+                        key={file}
+                        className="text-sm bg-muted/50 p-2 rounded flex items-center justify-between gap-2"
+                      >
                         <div className="flex items-center gap-2 truncate">
                           <span className="text-base shrink-0">📄</span>
                           <span className="truncate" title={file}>{file}</span>
                         </div>
-                        <Button variant="ghost" size="sm" onClick={() => handleDownload(file)} className="shrink-0 h-8 px-2" title="Download PDF">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDownload(file)}
+                          className="shrink-0 h-8 px-2"
+                          title="Download PDF"
+                        >
                           ⬇️
                         </Button>
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-sm text-gray-500 mb-6 italic">No PDFs uploaded yet. Upload one below.</p>
+                  <p className="text-sm text-gray-500 mb-6 italic">
+                    No PDFs uploaded yet. Upload one below.
+                  </p>
                 )}
 
                 <PdfUploader
                   projectId={selectedProject.id}
-                  token={session.access_token}
+                  getToken={getToken}
                   onUploadSuccess={() => fetchFiles(selectedProject.id)}
                 />
               </div>
 
               <div className="p-6 border rounded-xl bg-card shadow-sm col-span-2 md:col-span-1">
-                <ChatBox projectId={selectedProject.id} token={session.access_token} />
+                <ChatBox projectId={selectedProject.id} getToken={getToken} />
               </div>
             </div>
           </div>

@@ -1,0 +1,28 @@
+# Environment variables & secrets — NEVER commit these
+backend/.env
+frontend/.env.local
+.env
+.env.*
+
+# Firebase service account key — NEVER commit this
+backend/firebase-service-account.json
+firebase-service-account.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Node.js
+node_modules/
+.next/
+out/
+
+# OS
+.DS_Store
+Thumbs.db

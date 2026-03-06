@@ -3,7 +3,8 @@ uvicorn
 python-dotenv
 python-multipart
 
-supabase
+firebase-admin
+numpy
 pypdf
 
 langchain

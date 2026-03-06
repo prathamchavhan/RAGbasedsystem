@@ -1,82 +1,69 @@
-# 📄 PDF Chat Application using RAG
+# PDF Chat App
 
-A full-stack **PDF Question Answering system** built using  
-**Next.js (Frontend)** + **Python FastAPI (Backend)** + **Supabase (Vector DB)** + **LangChain + Gemini LLM**.
+A full-stack AI-powered PDF chatbot built with:
 
-Users can upload a PDF and ask questions.  
-Answers are generated **only from the uploaded PDF** using **Retrieval-Augmented Generation (RAG)**.
+**Next.js (Frontend)** + **Python FastAPI (Backend)** + **Firebase (Auth, Firestore, Storage)** + **LangChain + Gemini LLM**.
 
----
+## Features
 
-## 🚀 Features
+- 🔐 Google Sign-in via Firebase Auth
+- 📁 Project-based PDF management
+- 📄 Upload PDFs and extract text automatically
+- 🧠 Embed text chunks using Gemini Embeddings
+- 🗄️ Store embeddings in Firestore
+- 🔍 Cosine similarity search in Python
+- 💬 Ask questions and get AI-powered answers from your PDFs
 
-- 📤 Upload PDF files
-- 🔍 Convert PDF text into vector embeddings
-- 🗄️ Store embeddings in Supabase (pgvector)
-- 🤖 Ask questions using Gemini LLM
-- ✅ Answers come strictly from PDF content (no hallucination)
-- 🔐 API keys stored securely using `.env`
+## How It Works
 
----
+```
+PDF → Text → Embeddings → Firestore
+Question → Embedding → Cosine Similarity → Top Chunks → Gemini LLM → Answer
+```
 
-## 🧠 How RAG Works (Simple Explanation)
+## Tech Stack
 
-PDF → Text → Embeddings → Supabase
-Question → Similarity Search → Gemini → Answer
+- Next.js 16 (App Router)
+- FastAPI (Python)
+- Firebase (Auth + Firestore + Storage)
+- LangChain + Google Gemini
+- Tailwind CSS + shadcn/ui
 
+## Project Structure
 
----
+```
+pdfchat/
+├── frontend/
+│   ├── app/page.js              # Main UI (Firebase Auth, Firestore)
+│   ├── components/
+│   │   ├── ChatBox.jsx          # Question/answer UI
+│   │   └── PdfUploader.jsx      # PDF upload UI
+│   └── lib/
+│       ├── firebase.js          # Firebase client setup
+│       └── api.js               # Backend API calls
+└── backend/
+    ├── main.py                  # FastAPI routes
+    ├── rag.py                   # RAG pipeline (index + ask)
+    ├── firebase_client.py       # Firebase Admin SDK setup
+    └── firebase-service-account.json  # ⚠️ NOT in git
+```
 
-## 🛠 Tech Stack
+## Setup
 
-### Frontend
-- Next.js (JSX)
-- Tailwind CSS
-- shadcn/ui
+See the Firebase migration setup guide for full instructions.
 
 ### Backend
-- Python 3
-- FastAPI
-- LangChain
-- Gemini LLM
-- Supabase (Vector Database)
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --reload
+```
 
----
-
-## 📁 Project Structure
-    pdfchat/
-    ├── backend/
-    │   ├── main.py
-    │   ├── rag.py
-    │   ├── supabase_client.py
-    │   ├── requirements.txt
-    │   ├── .env
-    │   ├── venv/
-    │   └── __pycache__/
-    │
-    ├── frontend/
-    │   ├── app/
-    │   │   ├── page.jsx
-    │   │   ├── layout.jsx
-    │   │   └── globals.css
-    │   │
-    │   ├── components/
-    │   │   ├── PdfUploader.jsx
-    │   │   └── ChatBox.jsx
-    │   │
-    │   ├── lib/
-    │   │   └── api.js
-    │   │
-    │   ├── public/
-    │   │   └── favicon.ico
-    │   │
-    │   ├── package.json
-    │   ├── package-lock.json
-    │   ├── tailwind.config.js
-    │   ├── postcss.config.js
-    │   ├── components.json
-    │   └── node_modules/
-    │
-    ├── .gitignore
-    ├── README.md
-    └── sample.pdf
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```

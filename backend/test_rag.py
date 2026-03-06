@@ -1,15 +1,18 @@
-from rag import ask_pdf
-from supabase_client import supabase
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from firebase_client import db
+
+def test_firebase_connection():
+    try:
+        # Check pdf_docs collection count
+        docs = db.collection("pdf_docs").limit(1).stream()
+        count = sum(1 for _ in docs)
+        print(f"✅ Firebase Firestore connected. pdf_docs collection accessible.")
+    except Exception as e:
+        print(f"❌ Firebase connection error: {e}")
 
 if __name__ == "__main__":
-    print("Testing Ask PDF...")
-    try:
-        # Check current data in supabase
-        count = supabase.table("pdf_docs").select("*", count="exact", head=True).execute()
-        print(f"Total documents in Supabase: {count.count}")
-
-        # Try to query
-        answer = ask_pdf("What is the main topic of the document?")
-        print(f"Answer: {answer}")
-    except Exception as e:
-        print(f"Exception calling ask_pdf: {e}")
+    test_firebase_connection()
