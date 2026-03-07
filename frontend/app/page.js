@@ -1,52 +1,51 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { auth, db, storage, googleProvider } from "@/lib/firebase";
+import { auth, db, googleProvider } from "@/lib/firebase";
 import {
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   onAuthStateChanged,
 } from "firebase/auth";
 import {
-  collection,
-  addDoc,
-  query,
-  where,
-  getDocs,
-  serverTimestamp,
-} from "firebase/firestore";
-import { ref, getBlob } from "firebase/storage";
+  ref as dbRef,
+  push,
+  get,
+  remove,
+  update,
+  set,
+} from "firebase/database";
 import PdfUploader from "@/components/PdfUploader";
-import ChatBox from "@/components/ChatBox";
+import ChatInterface from "@/components/ChatInterface";
+import ShareModal from "@/components/ShareModal";
 import { Button } from "@/components/ui/button";
 
 export default function Home() {
   const [user, setUser] = useState(null);
-  const [idToken, setIdToken] = useState(null);
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [newProjectName, setNewProjectName] = useState("");
   const [projectFiles, setProjectFiles] = useState([]);
+  const [showUploader, setShowUploader] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+
+  const hasFullAccess = !selectedProject?.is_shared || selectedProject?.role === "full";
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
-      if (firebaseUser) {
-        const token = await firebaseUser.getIdToken();
-        setIdToken(token);
-        fetchProjects(firebaseUser.uid);
-      } else {
-        setIdToken(null);
-        setProjects([]);
-        setSelectedProject(null);
-      }
+      if (firebaseUser) fetchProjects(firebaseUser.uid);
+      else { setProjects([]); setSelectedProject(null); }
     });
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (selectedProject) {
-      fetchFiles(selectedProject.id);
+    if (selectedProject && user) {
+      const ownerUid = selectedProject.owner_uid || user.uid;
+      fetchFiles(selectedProject.id, ownerUid);
+      setShowUploader(false);
     } else {
       setProjectFiles([]);
     }
@@ -54,203 +53,268 @@ export default function Home() {
 
   const fetchProjects = async (uid) => {
     try {
-      const q = query(
-        collection(db, "projects"),
-        where("user_id", "==", uid)
-      );
-      const snapshot = await getDocs(q);
-      const data = snapshot.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() }))
-        .sort((a, b) => {
-          // Sort by created_at descending (newest first) client-side
-          const aTime = a.created_at?.seconds ?? 0;
-          const bTime = b.created_at?.seconds ?? 0;
-          return bTime - aTime;
-        });
-      setProjects(data);
-    } catch (err) {
-      console.error("fetchProjects error:", err);
-    }
+      const snap = await get(dbRef(db, `projects/${uid}`));
+      if (snap.exists()) {
+        const list = Object.entries(snap.val())
+          .map(([id, v]) => ({ id, ...v }))
+          .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+        setProjects(list);
+      } else setProjects([]);
+    } catch (err) { console.error("fetchProjects:", err); }
   };
 
-  const fetchFiles = async (projectId) => {
-    const q = query(
-      collection(db, "pdf_docs"),
-      where("project_id", "==", projectId),
-      where("user_id", "==", user.uid)
-    );
-    const snapshot = await getDocs(q);
-    const filenames = snapshot.docs.map((doc) => doc.data().filename);
-    const uniqueFiles = [...new Set(filenames)];
-    setProjectFiles(uniqueFiles);
-  };
-
-  const handleDownload = async (filename) => {
+  const fetchFiles = async (projectId, projectOwnerUid) => {
     try {
-      const storagePath = `${user.uid}/${selectedProject.id}/${filename}`;
-      const fileRef = ref(storage, storagePath);
-      const blob = await getBlob(fileRef);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      a.remove();
-    } catch (error) {
-      console.error("Download error:", error);
-      alert("Error downloading file.");
-    }
+      const snap = await get(dbRef(db, `pdf_files/${projectOwnerUid}/${projectId}`));
+      let files = [];
+      if (snap.exists()) {
+        files = Object.values(snap.val()).map((f) => ({ filename: f.filename, url: f.url }));
+      } else {
+        // Fallback: read from pdf_docs chunks
+        const docsSnap = await get(dbRef(db, `pdf_docs/${projectOwnerUid}/${projectId}`));
+        if (docsSnap.exists()) {
+          const names = [...new Set(Object.values(docsSnap.val()).map((d) => d.filename).filter(Boolean))];
+          files = names.map((f) => ({ filename: f, url: null }));
+        }
+      }
+
+      const proj = projects.find(p => p.id === projectId);
+      if (proj && proj.role === "limited" && proj.allowed_pdfs) {
+        files = files.filter(f => proj.allowed_pdfs.includes(f.filename));
+      }
+      setProjectFiles(files);
+    } catch (err) { console.error("fetchFiles:", err); }
+  };
+
+  const deleteFile = async (f) => {
+    if (!confirm(`Delete "${f.filename}"?`)) return;
+    try {
+      if (f.url) await fetch("/api/delete-pdf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: f.url }) });
+      const ownerUid = selectedProject.owner_uid || user.uid;
+      const fileKey = f.filename.replace(/[^a-zA-Z0-9]/g, "_");
+      await remove(dbRef(db, `pdf_files/${ownerUid}/${selectedProject.id}/${fileKey}`));
+      const chunksRef = dbRef(db, `pdf_docs/${ownerUid}/${selectedProject.id}`);
+      const snap = await get(chunksRef);
+      if (snap.exists()) {
+        const upd = {};
+        Object.entries(snap.val()).forEach(([k, v]) => { if (v.filename === f.filename) upd[k] = null; });
+        if (Object.keys(upd).length) await update(chunksRef, upd);
+      }
+      fetchFiles(selectedProject.id, ownerUid);
+    } catch (err) { alert("Delete failed: " + err.message); }
   };
 
   const createProject = async () => {
     if (!newProjectName.trim()) return;
     try {
-      const docRef = await addDoc(collection(db, "projects"), {
-        name: newProjectName,
-        user_id: user.uid,
-        created_at: serverTimestamp(),
-      });
-      const newProject = { id: docRef.id, name: newProjectName, user_id: user.uid };
+      const ref = await push(dbRef(db, `projects/${user.uid}`), { name: newProjectName, created_at: Date.now() });
+      const newProject = { id: ref.key, name: newProjectName };
       setProjects([newProject, ...projects]);
       setNewProjectName("");
       setSelectedProject(newProject);
-    } catch (err) {
-      console.error("createProject error:", err);
-      alert("Failed to create project: " + err.message);
-    }
+    } catch (err) { alert("Failed: " + err.message); }
+  };
+
+  const shareProject = () => {
+    setShowShareModal(true);
+  };
+
+
+  const deleteProject = async (p, e) => {
+    e.stopPropagation();
+    if (!confirm(`Delete project "${p.name}" and all its data?`)) return;
+    await set(dbRef(db, `projects/${user.uid}/${p.id}`), null);
+    await set(dbRef(db, `pdf_files/${user.uid}/${p.id}`), null);
+    await set(dbRef(db, `pdf_docs/${user.uid}/${p.id}`), null);
+    await set(dbRef(db, `chats/${user.uid}/${p.id}`), null);
+    await set(dbRef(db, `chat_messages/${user.uid}/${p.id}`), null);
+    setProjects(projects.filter((x) => x.id !== p.id));
+    if (selectedProject?.id === p.id) { setSelectedProject(null); setProjectFiles([]); }
   };
 
   const loginWithGoogle = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (error) {
-      console.error("Login error:", error);
+      if (error.code === "auth/popup-blocked" || error.code === "auth/popup-cancelled") {
+        await signInWithRedirect(auth, googleProvider);
+      }
     }
   };
 
-  const handleLogout = async () => {
-    await signOut(auth);
-  };
-
-  // Refresh ID token for API calls (tokens expire after 1 hour)
-  const getToken = async () => {
-    if (!user) return null;
-    return await user.getIdToken();
-  };
+  const getToken = async () => user ? await user.getIdToken() : null;
 
   if (!user) {
     return (
-      <main className="max-w-md mx-auto p-8 mt-20 text-center space-y-6">
-        <h1 className="text-3xl font-bold">📄 PDF Chat App</h1>
-        <p className="text-gray-500">Sign in to manage your projects and PDFs.</p>
-        <Button onClick={loginWithGoogle} className="w-full">Sign in with Google</Button>
-      </main>
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center space-y-6 max-w-sm px-6">
+          <div className="text-6xl">📄</div>
+          <h1 className="text-3xl font-bold">PDF Chat</h1>
+          <p className="text-muted-foreground">Upload PDFs and chat with your documents using AI.</p>
+          <Button onClick={loginWithGoogle} className="w-full" size="lg">
+            Sign in with Google
+          </Button>
+        </div>
+      </div>
     );
   }
 
   return (
-    <main className="max-w-5xl mx-auto p-8 grid md:grid-cols-3 gap-8">
-      {/* Sidebar for Projects */}
-      <div className="space-y-6 md:border-r pr-6">
-        <div className="flex justify-between items-center">
-          <h2 className="text-xl font-bold">Projects</h2>
-          <Button variant="outline" size="sm" onClick={handleLogout}>Logout</Button>
+    <div className="flex h-screen bg-background overflow-hidden">
+      {/* Left Sidebar — Projects */}
+      <div className="w-60 shrink-0 border-r flex flex-col bg-muted/10">
+        {/* Header */}
+        <div className="p-4 border-b flex items-center justify-between">
+          <span className="font-bold text-sm">📄 PDF Chat</span>
+          <button onClick={() => signOut(auth)} className="text-xs text-muted-foreground hover:text-foreground transition" title="Logout">
+            Sign out
+          </button>
         </div>
 
-        <div className="flex gap-2">
-          <input
-            type="text"
-            placeholder="New project name..."
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            value={newProjectName}
-            onChange={(e) => setNewProjectName(e.target.value)}
-          />
-          <Button onClick={createProject}>Add</Button>
+        {/* New project input */}
+        <div className="p-3 border-b">
+          <div className="flex gap-1">
+            <input
+              type="text"
+              placeholder="New project..."
+              className="flex-1 text-xs border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+              value={newProjectName}
+              onChange={(e) => setNewProjectName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && createProject()}
+            />
+            <Button size="sm" onClick={createProject} className="text-xs px-3">+</Button>
+          </div>
         </div>
 
-        <ul className="space-y-2">
-          {projects.map((p) => (
-            <li key={p.id}>
-              <button
-                className={`w-full text-left p-3 rounded-md transition-colors ${selectedProject?.id === p.id
-                  ? "bg-primary text-primary-foreground font-medium"
-                  : "bg-muted/50 hover:bg-muted"
-                  }`}
-                onClick={() => setSelectedProject(p)}
-              >
-                {p.name}
-              </button>
-            </li>
-          ))}
+        {/* Project list */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {projects.length === 0 && (
-            <p className="text-sm text-gray-500 text-center py-4">No projects yet.</p>
+            <p className="text-xs text-muted-foreground text-center pt-6">No projects yet</p>
           )}
-        </ul>
+          {projects.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setSelectedProject(p)}
+              className={`w-full text-left px-3 py-2.5 rounded-lg text-sm truncate flex items-center justify-between gap-1 group transition-colors ${selectedProject?.id === p.id ? "bg-primary text-primary-foreground font-medium" : "hover:bg-muted"
+                }`}
+            >
+              <span className="truncate">📁 {p.name}</span>
+              <span
+                onClick={(e) => deleteProject(p, e)}
+                className="shrink-0 opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity text-xs"
+                title="Delete project"
+              >🗑️</span>
+            </button>
+          ))}
+        </div>
+
+        {/* User info */}
+        <div className="p-3 border-t flex items-center gap-2">
+          {user.photoURL && <img src={user.photoURL} className="w-7 h-7 rounded-full" alt="" />}
+          <span className="text-xs text-muted-foreground truncate">{user.displayName || user.email}</span>
+        </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="md:col-span-2 space-y-8 pl-2">
-        {!selectedProject ? (
-          <div className="h-full flex items-center justify-center text-gray-500 min-h-[400px] border-2 border-dashed rounded-lg">
-            <p>Select or create a project from the sidebar to start chatting.</p>
+      {/* Main Area */}
+      {!selectedProject ? (
+        <div className="flex-1 flex items-center justify-center text-muted-foreground">
+          <div className="text-center space-y-3">
+            <div className="text-5xl">👈</div>
+            <p className="font-medium">Select or create a project to start</p>
           </div>
-        ) : (
-          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="border-b pb-4">
-              <h2 className="text-3xl font-bold">{selectedProject.name}</h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Upload PDFs and ask questions specifically for this project.
-              </p>
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Project header */}
+          <div className="border-b px-6 py-3 flex items-center justify-between shrink-0">
+            <div>
+              <h2 className="font-bold text-lg">{selectedProject.name}</h2>
+              <p className="text-xs text-muted-foreground">{projectFiles.length} PDF(s) loaded</p>
             </div>
+            <div className="flex items-center gap-2">
+              {hasFullAccess && (
+                <button
+                  onClick={shareProject}
+                  className="text-xs border rounded-lg px-3 py-1.5 hover:bg-muted transition flex items-center gap-1"
+                  title="Invite others via Email"
+                >
+                  ✉️ Share
+                </button>
+              )}
+              <button
+                onClick={() => setShowUploader(!showUploader)}
+                className="text-xs border rounded-lg px-3 py-1.5 hover:bg-muted transition flex items-center gap-1"
+              >
+                📎 {showUploader ? "Hide" : "Manage"} PDFs
+              </button>
+            </div>
+          </div>
 
-            <div className="grid grid-cols-2 gap-6">
-              <div className="p-6 border rounded-xl bg-card shadow-sm col-span-2 md:col-span-1">
-                <h3 className="font-semibold mb-4">Chat Context</h3>
-                {projectFiles.length > 0 ? (
-                  <ul className="space-y-2 mb-6">
-                    {projectFiles.map((file) => (
-                      <li
-                        key={file}
-                        className="text-sm bg-muted/50 p-2 rounded flex items-center justify-between gap-2"
-                      >
-                        <div className="flex items-center gap-2 truncate">
-                          <span className="text-base shrink-0">📄</span>
-                          <span className="truncate" title={file}>{file}</span>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDownload(file)}
-                          className="shrink-0 h-8 px-2"
-                          title="Download PDF"
-                        >
-                          ⬇️
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-gray-500 mb-6 italic">
-                    No PDFs uploaded yet. Upload one below.
-                  </p>
+          {/* PDF Manager panel (collapsible) */}
+          {showUploader && (
+            <div className="border-b px-6 py-4 bg-muted/20 shrink-0">
+              <div className="flex gap-6 flex-wrap">
+                {/* File list */}
+                <div className="flex-1 min-w-[200px]">
+                  <h4 className="text-sm font-medium mb-2">Uploaded PDFs</h4>
+                  {projectFiles.length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic">No PDFs yet</p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {projectFiles.map((f) => (
+                        <li key={f.filename} className="flex items-center gap-2 text-xs">
+                          <span>📄</span>
+                          <span className="truncate flex-1">{f.filename}</span>
+                          {f.url && (
+                            <a href={f.url} target="_blank" rel="noopener noreferrer"
+                              className="px-1.5 py-0.5 bg-primary text-primary-foreground rounded text-xs hover:opacity-80">⬇️</a>
+                          )}
+                          {hasFullAccess && (
+                            <button onClick={() => deleteFile(f)}
+                              className="px-1.5 py-0.5 bg-destructive text-destructive-foreground rounded text-xs hover:opacity-80">🗑️</button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                {/* Uploader */}
+                {hasFullAccess && (
+                  <div className="flex-1 min-w-[220px]">
+                    <h4 className="text-sm font-medium mb-2">Upload New PDFs</h4>
+                    <PdfUploader
+                      projectId={selectedProject.id}
+                      uid={selectedProject.owner_uid || user.uid}
+                      getToken={getToken}
+                      onUploadSuccess={() => fetchFiles(selectedProject.id, selectedProject.owner_uid || user.uid)}
+                    />
+                  </div>
                 )}
-
-                <PdfUploader
-                  projectId={selectedProject.id}
-                  getToken={getToken}
-                  onUploadSuccess={() => fetchFiles(selectedProject.id)}
-                />
-              </div>
-
-              <div className="p-6 border rounded-xl bg-card shadow-sm col-span-2 md:col-span-1">
-                <ChatBox projectId={selectedProject.id} getToken={getToken} />
               </div>
             </div>
+          )}
+
+          {/* Chat Interface */}
+          <div className="flex-1 min-h-0">
+            <ChatInterface
+              projectId={selectedProject.id}
+              uid={selectedProject.owner_uid || user.uid}
+              getToken={getToken}
+              projectFiles={projectFiles}
+              ownerUid={selectedProject.owner_uid || user.uid}
+              allowedPdfs={projectFiles.map((f) => f.filename)}
+            />
           </div>
-        )}
-      </div>
-    </main>
+
+          <ShareModal
+            isOpen={showShareModal}
+            onClose={() => setShowShareModal(false)}
+            project={selectedProject}
+            projectFiles={projectFiles}
+            user={user}
+          />
+        </div>
+      )}
+    </div>
   );
 }

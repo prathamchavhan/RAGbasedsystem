@@ -7,8 +7,4 @@ firebase-admin
 numpy
 pypdf
 
-langchain
-langchain-core
-langchain-text-splitters
-langchain-google-genai
-google-generativeai
+groq

@@ -52,14 +52,17 @@ async def ask_question(
         token = authorization.split(" ", 1)[1]
 
         project_id = payload.get("project_id")
+        owner_uid = payload.get("owner_uid")
         question = payload.get("question")
+        history = payload.get("history", [])  # list of {role, content}
+        allowed_pdfs = payload.get("allowed_pdfs", [])
 
         if not project_id:
             raise ValueError("Missing project_id in payload")
         if not question:
             raise ValueError("Missing question in payload")
 
-        answer = ask_pdf(question, project_id, token)
+        answer = ask_pdf(question, project_id, token, history, owner_uid=owner_uid, allowed_pdfs=allowed_pdfs)
         return {"answer": answer}
     except Exception as e:
         print("--- ERROR IN /ask ---")

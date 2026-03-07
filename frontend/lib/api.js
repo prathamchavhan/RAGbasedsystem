@@ -22,14 +22,14 @@ export async function uploadPDF(file, projectId, token) {
   return res.json();
 }
 
-export async function askQuestion(question, projectId, token) {
+export async function askQuestion(question, projectId, token, history = [], ownerUid = null, allowedPdfs = []) {
   const res = await fetch(`${BACKEND_URL}/ask`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${token}`
     },
-    body: JSON.stringify({ question, project_id: projectId }),
+    body: JSON.stringify({ question, project_id: projectId, history, owner_uid: ownerUid, allowed_pdfs: allowedPdfs }),
   });
 
   if (!res.ok) {
