@@ -1,5 +1,15 @@
 const BACKEND_URL = "http://localhost:8000";
 
+async function parseError(res) {
+  const text = await res.text().catch(() => "");
+  try {
+    const json = JSON.parse(text);
+    return json.error || json.detail || text || `HTTP ${res.status}`;
+  } catch {
+    return text || `HTTP ${res.status}`;
+  }
+}
+
 export async function uploadPDF(file, projectId, token) {
   const formData = new FormData();
   formData.append("file", file);
@@ -14,9 +24,9 @@ export async function uploadPDF(file, projectId, token) {
   });
 
   if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    console.error("Upload Backend Error:", errorData);
-    throw new Error(errorData.error || `Upload failed with status: ${res.status}`);
+    const errMsg = await parseError(res);
+    console.error("Upload Backend Error:", errMsg);
+    throw new Error(errMsg);
   }
 
   return res.json();
@@ -33,9 +43,9 @@ export async function askQuestion(question, projectId, token, history = [], owne
   });
 
   if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    console.error("Ask Backend Error:", errorData);
-    throw new Error(errorData.error || `Ask failed with status: ${res.status}`);
+    const errMsg = await parseError(res);
+    console.error("Ask Backend Error:", errMsg);
+    throw new Error(errMsg);
   }
 
   return res.json();

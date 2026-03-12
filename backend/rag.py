@@ -17,6 +17,12 @@ if not GROQ_API_KEY:
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 
+# Current supported Groq model — context is capped at 4000 chars to stay within TPM limits
+MODEL = "llama-3.1-8b-instant"
+
+# Hard cap on context characters sent to Groq (~4 chars ≈ 1 token → 4000 chars ≈ 1000 tokens)
+MAX_CONTEXT_CHARS = 4000
+
 
 def tokenize(text: str) -> list:
     """Simple word tokenizer — lowercase, letters only."""
@@ -25,7 +31,7 @@ def tokenize(text: str) -> list:
 
 def bm25_score(query_tokens: list, doc_tokens: list, avg_dl: float,
                idf: dict, k1: float = 1.5, b: float = 0.75) -> float:
-    """BM25 relevance score — better than simple TF-IDF."""
+    """BM25 relevance score."""
     tf = Counter(doc_tokens)
     dl = len(doc_tokens)
     score = 0.0
@@ -37,7 +43,7 @@ def bm25_score(query_tokens: list, doc_tokens: list, avg_dl: float,
 
 
 def split_text(text: str, chunk_size: int = 800, overlap: int = 100) -> list:
-    """Simple sliding-window text chunker — no external deps."""
+    """Simple sliding-window text chunker."""
     chunks = []
     start = 0
     while start < len(text):
@@ -46,7 +52,8 @@ def split_text(text: str, chunk_size: int = 800, overlap: int = 100) -> list:
         start += chunk_size - overlap
     return [c.strip() for c in chunks if c.strip()]
 
-def retrieve_top_chunks(question: str, chunks: list, top_k: int = 8) -> list:
+
+def retrieve_top_chunks(question: str, chunks: list, top_k: int = 4) -> list:
     """Retrieve most relevant chunks using BM25."""
     q_tokens = tokenize(question)
     tokenized = [tokenize(c) for c in chunks]
@@ -54,7 +61,6 @@ def retrieve_top_chunks(question: str, chunks: list, top_k: int = 8) -> list:
     N = len(chunks)
     avg_dl = sum(len(t) for t in tokenized) / N if N > 0 else 1
 
-    # Compute IDF for query terms
     idf = {}
     for term in set(q_tokens):
         df = sum(1 for t in tokenized if term in t)
@@ -63,6 +69,13 @@ def retrieve_top_chunks(question: str, chunks: list, top_k: int = 8) -> list:
     scores = [bm25_score(q_tokens, t, avg_dl, idf) for t in tokenized]
     top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
     return [chunks[i] for i in top_indices if scores[i] > 0]
+
+
+def cap_context(text: str, max_chars: int = MAX_CONTEXT_CHARS) -> str:
+    """Hard-cap context to avoid exceeding model token limits."""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n\n[...content truncated to fit model limits...]"
 
 
 SUMMARY_KEYWORDS = {
@@ -76,7 +89,6 @@ SUMMARY_KEYWORDS = {
 }
 
 def is_summary_query(question: str) -> bool:
-    """Detect if the user is asking for a summary or overview."""
     q = question.lower()
     return any(kw in q for kw in SUMMARY_KEYWORDS)
 
@@ -90,17 +102,15 @@ DIAGRAM_KEYWORDS = {
 }
 
 def is_diagram_query(question: str) -> bool:
-    """Detect if the user wants a diagram/chart."""
     q = question.lower()
     return any(kw in q for kw in DIAGRAM_KEYWORDS)
 
 
-def get_summary_context(chunks: list, max_chunks: int = 20) -> str:
-    """Sample chunks evenly across the document for a full summary."""
+def get_summary_context(chunks: list, max_chunks: int = 6) -> str:
+    """Sample chunks evenly across the document."""
     if len(chunks) <= max_chunks:
         selected = chunks
     else:
-        # Pick evenly spaced chunks to cover the whole document
         step = len(chunks) // max_chunks
         selected = [chunks[i] for i in range(0, len(chunks), step)][:max_chunks]
     return "\n\n".join([f"[Section {i+1}]\n{c}" for i, c in enumerate(selected)])
@@ -110,7 +120,6 @@ def index_pdf(file, filename: str, project_id: str, auth_token: str):
     uid = verify_token(auth_token)
     file.seek(0)
 
-    # Extract text from PDF
     reader = PdfReader(file)
     text = ""
     for page in reader.pages:
@@ -121,10 +130,8 @@ def index_pdf(file, filename: str, project_id: str, auth_token: str):
     if not text.strip():
         raise ValueError("Could not extract text from PDF. It may be scanned/image-based.")
 
-    # Split into chunks
     chunks = split_text(text, chunk_size=800, overlap=100)
 
-    # Store chunks in Realtime Database
     pdf_docs_ref = get_db().child(f"pdf_docs/{uid}/{project_id}")
     for chunk in chunks:
         pdf_docs_ref.push({
@@ -139,14 +146,12 @@ def ask_pdf(question: str, project_id: str, auth_token: str, history: list = [],
     uid = verify_token(auth_token)
     target_uid = owner_uid if owner_uid else uid
 
-    # Fetch all chunks for this project
     docs_ref = get_db().child(f"pdf_docs/{target_uid}/{project_id}")
     snapshot = docs_ref.get()
 
     if not snapshot:
         return "No PDFs found for this project. Please upload a PDF first."
 
-    # Group chunks by filename so we know what files are indexed
     from collections import defaultdict
     by_file = defaultdict(list)
     for data in snapshot.values():
@@ -164,11 +169,10 @@ def ask_pdf(question: str, project_id: str, auth_token: str, history: list = [],
 
     # --- Summary / overview request ---
     if is_summary_query(question):
-        # Build per-PDF context — each file gets its own clearly labelled section
         per_file_context = []
         for fname, chunks in by_file.items():
-            # Sample evenly across the file, up to 25 chunks for richer detail
-            max_c = 25
+            # Max 6 chunks per file to stay under token limits
+            max_c = 6
             if len(chunks) <= max_c:
                 selected = chunks
             else:
@@ -177,56 +181,44 @@ def ask_pdf(question: str, project_id: str, auth_token: str, history: list = [],
             joined = "\n\n".join([f"  [{i+1}] {c}" for i, c in enumerate(selected)])
             per_file_context.append(f"=== PDF: {fname} ===\n{joined}")
 
-        full_context = "\n\n".join(per_file_context)
-
+        full_context = cap_context("\n\n".join(per_file_context))
         multi = len(by_file) > 1
-        prompt = f"""You are an expert document analyst. The user has {len(by_file)} PDF(s) in this project.
+
+        prompt = f"""You are an expert document analyst. The user has {len(by_file)} PDF(s).
 
 User request: {question}
 
-CRITICAL INSTRUCTIONS:
-- Read ALL the document sections below very carefully.
-- {"Provide a SEPARATE, detailed summary for EACH PDF." if multi else "Provide a comprehensive summary of the PDF."}
-- Extract the ACTUAL content — names, skills, dates, facts, findings, conclusions — whatever is there.
-- Do NOT say information is missing. All content is provided below — report what you find.
-- For resumes: name, contact, skills, work experience (company/role/dates), education, projects, certifications.
-- For reports/docs: topic, key findings, conclusions, data, recommendations.
-- Use headers and bullet points for clarity.
-{"- Start each PDF summary with a bold header like: ## 📄 " + " / ## 📄 ".join(filenames) if multi else ""}
+Instructions:
+- {("Provide a SEPARATE summary for EACH PDF." if multi else "Provide a comprehensive summary of the PDF.")}
+- Extract actual content: names, skills, dates, facts, findings.
+- Use headers and bullet points.
 
 Document content:
 {full_context}
 
-{"Detailed summary for each PDF:" if multi else "Detailed summary:"}"""
+{"Summary for each PDF:" if multi else "Summary:"}"""
 
         response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model=MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=3000,
+            max_tokens=1200,
         )
         return response.choices[0].message.content
 
     # --- Diagram request ---
     if is_diagram_query(question):
-        # Give a wide context sample for diagram generation
-        context = get_summary_context(all_chunks, max_chunks=20)
-        prompt = f"""You are an expert at creating Mermaid.js diagrams from document content.
+        context = cap_context(get_summary_context(all_chunks, max_chunks=6))
+        prompt = f"""You are an expert at creating Mermaid.js diagrams.
 
-The user wants a diagram based on: "{question}"
+The user wants: "{question}"
 Documents: {', '.join(filenames)}
 
-INSTRUCTIONS:
-- Generate valid Mermaid.js syntax that visualizes the content.
-- Choose the best diagram type based on the request:
-  * Process/steps → flowchart TD
-  * People/structure → graph TD or mindmap
-  * Time-based → timeline
-  * Relationships → graph LR
-  * Skills/topics → mindmap
+Instructions:
+- Generate valid Mermaid.js syntax.
+- Choose the best diagram type (flowchart TD, graph LR, mindmap, timeline etc).
 - Keep node labels short (max 5 words each).
-- Use realistic content extracted from the document below.
-- Output ONLY the mermaid code block, nothing else before or after.
+- Output ONLY the mermaid code block. Nothing else.
 - Format: ```mermaid\n<diagram code>\n```
 
 Document content:
@@ -235,49 +227,48 @@ Document content:
 Mermaid diagram:"""
 
         response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model=MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=1024,
+            max_tokens=700,
         )
         return response.choices[0].message.content
 
-    # --- Specific question: use BM25 retrieval ---
-    top_chunks = retrieve_top_chunks(question, all_chunks, top_k=8)
+    # --- Specific question: BM25 retrieval ---
+    top_chunks = retrieve_top_chunks(question, all_chunks, top_k=4)
 
     if not top_chunks:
-        # Fallback: use first few chunks if BM25 finds nothing
-        top_chunks = all_chunks[:5]
+        top_chunks = all_chunks[:3]
 
-    context = "\n\n".join([f"Excerpt:\n{chunk}" for chunk in top_chunks])
+    context = cap_context("\n\n".join([f"Excerpt:\n{chunk}" for chunk in top_chunks]))
 
-    prompt = f"""You are a document analysis assistant. Read the excerpts below from '{', '.join(filenames)}' and answer the question.
+    prompt = f"""You are a document assistant for '{', '.join(filenames)}'.
 
-IMPORTANT: Base your answer strictly on what is written in the excerpts. 
-If this is a resume/CV, describe the person's actual skills, experience, and education found in the text.
-If you find relevant information, report it in detail with specifics (names, dates, numbers, etc.).
-Only say information is unavailable if it is genuinely absent from ALL excerpts.
+Base your answer strictly on the excerpts below. Be specific (names, dates, numbers).
+Only say info is unavailable if it's genuinely absent from ALL excerpts.
 
 Document excerpts:
 {context}
 
 Question: {question}
-Detailed answer:"""
+Answer:"""
 
-    # Build Groq messages with conversation history for context
     groq_messages = [
-        {"role": "system", "content": f"You are a helpful PDF assistant for document(s): {', '.join(filenames)}. Answer questions based on the provided document context. Be detailed and helpful."}
+        {"role": "system", "content": f"You are a helpful PDF assistant for: {', '.join(filenames)}. Answer based on document context only."}
     ]
-    # Add last 6 turns of history for context (without the document context to save tokens)
-    for h in history[-6:]:
-        groq_messages.append({"role": h["role"], "content": h["content"]})
-    # Add current question with retrieved context
+    # Last 3 turns of history, each capped at 300 chars to save tokens
+    for h in history[-3:]:
+        content = h["content"]
+        if len(content) > 300:
+            content = content[:300] + "..."
+        groq_messages.append({"role": h["role"], "content": content})
+
     groq_messages.append({"role": "user", "content": prompt})
 
     response = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model=MODEL,
         messages=groq_messages,
         temperature=0.2,
-        max_tokens=1536,
+        max_tokens=900,
     )
     return response.choices[0].message.content
