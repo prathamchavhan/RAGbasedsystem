@@ -1,136 +1,68 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { auth, db, googleProvider } from "@/lib/firebase";
+import { useEffect, useState, useRef } from "react";
+import { auth, googleProvider } from "@/lib/firebase";
 import {
   signInWithPopup,
   signInWithRedirect,
-  signOut,
   onAuthStateChanged,
 } from "firebase/auth";
-import {
-  ref as dbRef,
-  push,
-  get,
-  remove,
-  update,
-  set,
-} from "firebase/database";
-import PdfUploader from "@/components/PdfUploader";
-import ChatInterface from "@/components/ChatInterface";
-import ShareModal from "@/components/ShareModal";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
+import gsap from "gsap";
+import { FileText, Sparkles, Wand2, Shield, ArrowRight } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function Home() {
-  const [user, setUser] = useState(null);
-  const [projects, setProjects] = useState([]);
-  const [selectedProject, setSelectedProject] = useState(null);
-  const [newProjectName, setNewProjectName] = useState("");
-  const [projectFiles, setProjectFiles] = useState([]);
-  const [showUploader, setShowUploader] = useState(false);
-  const [showShareModal, setShowShareModal] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState("");
+  const router = useRouter();
+  const bgRef = useRef(null);
+  const floatingIconsRef = useRef(null);
 
-  const hasFullAccess = !selectedProject?.is_shared || selectedProject?.role === "full";
+  const titleText = "Unlock the knowledge inside your documents.";
+  const titleChars = titleText.split("");
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser);
-      if (firebaseUser) fetchProjects(firebaseUser.uid);
-      else { setProjects([]); setSelectedProject(null); }
+      if (firebaseUser) {
+        router.push("/dashboard");
+      } else {
+        setLoading(false);
+      }
     });
     return () => unsubscribe();
-  }, []);
+  }, [router]);
 
   useEffect(() => {
-    if (selectedProject && user) {
-      const ownerUid = selectedProject.owner_uid || user.uid;
-      fetchFiles(selectedProject.id, ownerUid);
-      setShowUploader(false);
-    } else {
-      setProjectFiles([]);
+    if (!loading && bgRef.current) {
+      // GSAP background animation
+      gsap.to(bgRef.current, {
+        backgroundPosition: "200% center",
+        ease: "none",
+        duration: 15,
+        repeat: -1,
+      });
+
+      // GSAP floating icons animation
+      if (floatingIconsRef.current) {
+        const icons = floatingIconsRef.current.children;
+        gsap.to(icons, {
+          y: "random(-20, 20)",
+          x: "random(-20, 20)",
+          rotation: "random(-15, 15)",
+          duration: "random(2, 4)",
+          repeat: -1,
+          yoyo: true,
+          ease: "sine.inOut",
+          stagger: 0.2,
+        });
+      }
     }
-  }, [selectedProject]);
-
-  const fetchProjects = async (uid) => {
-    try {
-      const snap = await get(dbRef(db, `projects/${uid}`));
-      if (snap.exists()) {
-        const list = Object.entries(snap.val())
-          .map(([id, v]) => ({ id, ...v }))
-          .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-        setProjects(list);
-      } else setProjects([]);
-    } catch (err) { console.error("fetchProjects:", err); }
-  };
-
-  const fetchFiles = async (projectId, projectOwnerUid) => {
-    try {
-      const snap = await get(dbRef(db, `pdf_files/${projectOwnerUid}/${projectId}`));
-      let files = [];
-      if (snap.exists()) {
-        files = Object.values(snap.val()).map((f) => ({ filename: f.filename, url: f.url }));
-      } else {
-        // Fallback: read from pdf_docs chunks
-        const docsSnap = await get(dbRef(db, `pdf_docs/${projectOwnerUid}/${projectId}`));
-        if (docsSnap.exists()) {
-          const names = [...new Set(Object.values(docsSnap.val()).map((d) => d.filename).filter(Boolean))];
-          files = names.map((f) => ({ filename: f, url: null }));
-        }
-      }
-
-      const proj = projects.find(p => p.id === projectId);
-      if (proj && proj.role === "limited" && proj.allowed_pdfs) {
-        files = files.filter(f => proj.allowed_pdfs.includes(f.filename));
-      }
-      setProjectFiles(files);
-    } catch (err) { console.error("fetchFiles:", err); }
-  };
-
-  const deleteFile = async (f) => {
-    if (!confirm(`Delete "${f.filename}"?`)) return;
-    try {
-      if (f.url) await fetch("/api/delete-pdf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: f.url }) });
-      const ownerUid = selectedProject.owner_uid || user.uid;
-      const fileKey = f.filename.replace(/[^a-zA-Z0-9]/g, "_");
-      await remove(dbRef(db, `pdf_files/${ownerUid}/${selectedProject.id}/${fileKey}`));
-      const chunksRef = dbRef(db, `pdf_docs/${ownerUid}/${selectedProject.id}`);
-      const snap = await get(chunksRef);
-      if (snap.exists()) {
-        const upd = {};
-        Object.entries(snap.val()).forEach(([k, v]) => { if (v.filename === f.filename) upd[k] = null; });
-        if (Object.keys(upd).length) await update(chunksRef, upd);
-      }
-      fetchFiles(selectedProject.id, ownerUid);
-    } catch (err) { alert("Delete failed: " + err.message); }
-  };
-
-  const createProject = async () => {
-    if (!newProjectName.trim()) return;
-    try {
-      const ref = await push(dbRef(db, `projects/${user.uid}`), { name: newProjectName, created_at: Date.now() });
-      const newProject = { id: ref.key, name: newProjectName };
-      setProjects([newProject, ...projects]);
-      setNewProjectName("");
-      setSelectedProject(newProject);
-    } catch (err) { alert("Failed: " + err.message); }
-  };
-
-  const shareProject = () => {
-    setShowShareModal(true);
-  };
-
-
-  const deleteProject = async (p, e) => {
-    e.stopPropagation();
-    if (!confirm(`Delete project "${p.name}" and all its data?`)) return;
-    await set(dbRef(db, `projects/${user.uid}/${p.id}`), null);
-    await set(dbRef(db, `pdf_files/${user.uid}/${p.id}`), null);
-    await set(dbRef(db, `pdf_docs/${user.uid}/${p.id}`), null);
-    await set(dbRef(db, `chats/${user.uid}/${p.id}`), null);
-    await set(dbRef(db, `chat_messages/${user.uid}/${p.id}`), null);
-    setProjects(projects.filter((x) => x.id !== p.id));
-    if (selectedProject?.id === p.id) { setSelectedProject(null); setProjectFiles([]); }
-  };
+  }, [loading]);
 
   const loginWithGoogle = async () => {
     try {
@@ -142,179 +74,199 @@ export default function Home() {
     }
   };
 
-  const getToken = async () => user ? await user.getIdToken() : null;
+  const loginWithEmail = (e) => {
+    e.preventDefault();
+    alert(`Email login initiated for: ${email}\n(Note: Ensure Email/Password provider is enabled in Firebase)`);
+  };
 
-  if (!user) {
+  if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center space-y-6 max-w-sm px-6">
-          <div className="text-6xl">📄</div>
-          <h1 className="text-3xl font-bold">PDF Chat</h1>
-          <p className="text-muted-foreground">Upload PDFs and chat with your documents using AI.</p>
-          <Button onClick={loginWithGoogle} className="w-full" size="lg">
-            Sign in with Google
-          </Button>
-        </div>
+      <div className="h-screen w-screen flex items-center justify-center bg-background">
+        <motion.div
+          animate={{ scale: [1, 1.2, 1], rotate: [0, 180, 360] }}
+          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+        >
+          <FileText className="w-12 h-12 text-primary" />
+        </motion.div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
-      {/* Left Sidebar — Projects */}
-      <div className="w-60 shrink-0 border-r flex flex-col bg-muted/10">
-        {/* Header */}
-        <div className="p-4 border-b flex items-center justify-between">
-          <span className="font-bold text-sm">📄 PDF Chat</span>
-          <button onClick={() => signOut(auth)} className="text-xs text-muted-foreground hover:text-foreground transition" title="Logout">
-            Sign out
-          </button>
+    <div className="min-h-screen flex w-full bg-background overflow-hidden selection:bg-primary/20">
+
+      {/* LEFT SIDE - VISUAL/BRANDING */}
+      <motion.div
+        initial={{ x: "-100%" }}
+        animate={{ x: 0 }}
+        transition={{ duration: 0.8, ease: "easeInOut" }}
+        className="hidden lg:flex w-1/2 relative bg-card text-card-foreground overflow-hidden flex-col justify-between p-12 shadow-2xl z-20 rounded-r-3xl border-r"
+      >
+        {/* Animated Background Mesh */}
+        <div
+          ref={bgRef}
+          className="absolute inset-0 z-0 opacity-20 dark:opacity-40 bg-[length:200%_200%] bg-gradient-to-br from-zinc-500/20 via-zinc-400/10 to-transparent"
+          style={{ backgroundImage: "url('https://grainy-gradients.vercel.app/noise.svg')" }}
+        />
+        <div className="absolute inset-0 z-0 bg-background/50 mix-blend-overlay backdrop-blur-3xl" />
+
+        {/* Content */}
+        <div className="relative z-10 space-y-2">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5, duration: 0.5 }}
+            className="flex items-center gap-2"
+          >
+            <div className="p-2 bg-primary/10 dark:bg-primary/20 rounded-xl backdrop-blur-md border">
+              <FileText className="w-8 h-8 text-foreground" />
+            </div>
+            <span className="text-2xl font-bold tracking-tight text-foreground">PDF Chat</span>
+          </motion.div>
         </div>
 
-        {/* New project input */}
-        <div className="p-3 border-b">
-          <div className="flex gap-1">
-            <input
-              type="text"
-              placeholder="New project..."
-              className="flex-1 text-xs border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-              value={newProjectName}
-              onChange={(e) => setNewProjectName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && createProject()}
-            />
-            <Button size="sm" onClick={createProject} className="text-xs px-3">+</Button>
-          </div>
-        </div>
-
-        {/* Project list */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {projects.length === 0 && (
-            <p className="text-xs text-muted-foreground text-center pt-6">No projects yet</p>
-          )}
-          {projects.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => setSelectedProject(p)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg text-sm truncate flex items-center justify-between gap-1 group transition-colors ${selectedProject?.id === p.id ? "bg-primary text-primary-foreground font-medium" : "hover:bg-muted"
-                }`}
+        <div className="relative z-10 mt-auto mb-10">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.7, duration: 0.5 }}
+            className="max-w-xl space-y-6"
+          >
+            <h1 className="text-5xl font-extrabold tracking-tight leading-tight text-white flex flex-wrap gap-x-3">
+              {titleText.split(" ").map((word, wordIndex) => (
+                <span key={wordIndex} className="inline-block overflow-hidden">
+                  {word.split("").map((char, charIndex) => (
+                    <motion.span
+                      key={charIndex}
+                      className={`inline-block ${word === "knowledge" ? "font-black" : ""}`}
+                      initial={{ y: "100%", opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      transition={{
+                        duration: 0.8,
+                        delay: 1.0 + (wordIndex * 5 + charIndex) * 0.08,
+                        ease: [0.33, 1, 0.68, 1],
+                      }}
+                    >
+                      {char}
+                    </motion.span>
+                  ))}
+                </span>
+              ))}
+            </h1>
+            <motion.p
+              initial={{ opacity: 0, filter: "blur(10px)" }}
+              animate={{ opacity: 1, filter: "blur(0px)" }}
+              transition={{ delay: 3.5, duration: 1.5 }}
+              className="text-lg text-muted-foreground leading-relaxed font-medium"
             >
-              <span className="truncate">📁 {p.name}</span>
-              <span
-                onClick={(e) => deleteProject(p, e)}
-                className="shrink-0 opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity text-xs"
-                title="Delete project"
-              >🗑️</span>
-            </button>
-          ))}
-        </div>
+              Upload any PDF and instantly start interacting. Ask questions, extract summaries, and save hours of reading with our AI-powered assistant.
+            </motion.p>
 
-        {/* User info */}
-        <div className="p-3 border-t flex items-center gap-2">
-          {user.photoURL && <img src={user.photoURL} className="w-7 h-7 rounded-full" alt="" />}
-          <span className="text-xs text-muted-foreground truncate">{user.displayName || user.email}</span>
-        </div>
-      </div>
-
-      {/* Main Area */}
-      {!selectedProject ? (
-        <div className="flex-1 flex items-center justify-center text-muted-foreground">
-          <div className="text-center space-y-3">
-            <div className="text-5xl">👈</div>
-            <p className="font-medium">Select or create a project to start</p>
-          </div>
-        </div>
-      ) : (
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Project header */}
-          <div className="border-b px-6 py-3 flex items-center justify-between shrink-0">
-            <div>
-              <h2 className="font-bold text-lg">{selectedProject.name}</h2>
-              <p className="text-xs text-muted-foreground">{projectFiles.length} PDF(s) loaded</p>
-            </div>
-            <div className="flex items-center gap-2">
-              {hasFullAccess && (
-                <button
-                  onClick={shareProject}
-                  className="text-xs border rounded-lg px-3 py-1.5 hover:bg-muted transition flex items-center gap-1"
-                  title="Invite others via Email"
-                >
-                  ✉️ Share
-                </button>
-              )}
-              <button
-                onClick={() => setShowUploader(!showUploader)}
-                className="text-xs border rounded-lg px-3 py-1.5 hover:bg-muted transition flex items-center gap-1"
-              >
-                📎 {showUploader ? "Hide" : "Manage"} PDFs
-              </button>
-            </div>
-          </div>
-
-          {/* PDF Manager panel (collapsible) */}
-          {showUploader && (
-            <div className="border-b px-6 py-4 bg-muted/20 shrink-0">
-              <div className="flex gap-6 flex-wrap">
-                {/* File list */}
-                <div className="flex-1 min-w-[200px]">
-                  <h4 className="text-sm font-medium mb-2">Uploaded PDFs</h4>
-                  {projectFiles.length === 0 ? (
-                    <p className="text-xs text-muted-foreground italic">No PDFs yet</p>
-                  ) : (
-                    <ul className="space-y-1.5">
-                      {projectFiles.map((f) => (
-                        <li key={f.filename} className="flex items-center gap-2 text-xs">
-                          <span>📄</span>
-                          <span className="truncate flex-1">{f.filename}</span>
-                          {f.url && (
-                            <a href={f.url} target="_blank" rel="noopener noreferrer"
-                              className="px-1.5 py-0.5 bg-primary text-primary-foreground rounded text-xs hover:opacity-80">⬇️</a>
-                          )}
-                          {hasFullAccess && (
-                            <button onClick={() => deleteFile(f)}
-                              className="px-1.5 py-0.5 bg-destructive text-destructive-foreground rounded text-xs hover:opacity-80">🗑️</button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                {/* Uploader */}
-                {hasFullAccess && (
-                  <div className="flex-1 min-w-[220px]">
-                    <h4 className="text-sm font-medium mb-2">Upload New PDFs</h4>
-                    <PdfUploader
-                      projectId={selectedProject.id}
-                      uid={selectedProject.owner_uid || user.uid}
-                      getToken={getToken}
-                      onUploadSuccess={() => fetchFiles(selectedProject.id, selectedProject.owner_uid || user.uid)}
-                    />
-                  </div>
-                )}
+            <div className="flex items-center gap-4 pt-4 text-sm font-medium text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-foreground" /> Secure
+              </div>
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-foreground" /> AI-Powered
+              </div>
+              <div className="flex items-center gap-2">
+                <Wand2 className="w-4 h-4 text-foreground" /> Instant
               </div>
             </div>
-          )}
+          </motion.div>
+        </div>
 
-          {/* Chat Interface */}
-          <div className="flex-1 min-h-0">
-            <ChatInterface
-              projectId={selectedProject.id}
-              uid={selectedProject.owner_uid || user.uid}
-              getToken={getToken}
-              projectFiles={projectFiles}
-              ownerUid={selectedProject.owner_uid || user.uid}
-              allowedPdfs={projectFiles.map((f) => f.filename)}
-            />
+        {/* Floating Icons Decor */}
+        <div ref={floatingIconsRef} className="absolute top-1/2 right-12 bottom-0 w-64 h-64 z-10 opacity-40 pointer-events-none">
+          <div className="absolute top-0 right-0 p-4 bg-muted/50 backdrop-blur-md rounded-2xl border shadow-lg text-foreground">
+            <FileText className="w-10 h-10" />
+          </div>
+          <div className="absolute top-32 left-10 p-4 bg-muted/50 backdrop-blur-md rounded-2xl border shadow-lg text-foreground">
+            <Sparkles className="w-8 h-8" />
+          </div>
+          <div className="absolute bottom-10 right-20 p-4 bg-muted/50 backdrop-blur-md rounded-2xl border shadow-lg text-foreground">
+            <Wand2 className="w-12 h-12" />
+          </div>
+        </div>
+      </motion.div>
+
+      {/* RIGHT SIDE - AUTH */}
+      <div className="flex-1 flex flex-col justify-center items-center p-8 sm:p-12 relative z-10 w-full lg:w-1/2 bg-background">
+        <div className="absolute top-8 right-8 z-50">
+          <ThemeToggle />
+        </div>
+
+        {/* Mobile Header */}
+        <div className="lg:hidden absolute top-8 left-8 flex items-center gap-2">
+          <div className="p-2 bg-primary/10 rounded-xl text-primary">
+            <FileText className="w-6 h-6" />
+          </div>
+          <span className="text-xl font-bold tracking-tight text-foreground">PDF Chat</span>
+        </div>
+
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+          className="w-full max-w-sm space-y-8"
+        >
+          <div className="space-y-2 text-center lg:text-left">
+            <h2 className="text-3xl font-bold tracking-tight">Welcome back</h2>
+            <p className="text-muted-foreground">Sign in to your account to continue</p>
           </div>
 
-          <ShareModal
-            isOpen={showShareModal}
-            onClose={() => setShowShareModal(false)}
-            project={selectedProject}
-            projectFiles={projectFiles}
-            user={user}
-          />
-        </div>
-      )}
+          <div className="space-y-6">
+            <Button
+              onClick={loginWithGoogle}
+              variant="outline"
+              className="w-full h-12 text-sm font-medium hover:bg-muted/50 transition-all flex items-center gap-2 relative group"
+            >
+              <svg className="w-5 h-5 absolute left-4" viewBox="0 0 24 24">
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+              </svg>
+              <span>Continue with Google</span>
+              <ArrowRight className="w-4 h-4 absolute right-4 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all" />
+            </Button>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-muted" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">Or continue with email</span>
+              </div>
+            </div>
+
+            <form onSubmit={loginWithEmail} className="space-y-4">
+              <div className="space-y-2 block relative">
+                <Label htmlFor="email" className="text-xs font-semibold uppercase text-muted-foreground mb-1 block">Email Address</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="name@example.com"
+                  className="h-12 px-4 shadow-sm"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+              <Button type="submit" className="w-full h-12 font-medium shadow-sm">
+                Sign In with Email
+              </Button>
+            </form>
+          </div>
+
+          <div className="pt-6 text-center text-sm text-muted-foreground">
+            By clicking continue, you agree to our{" "}
+            <a href="#" className="underline underline-offset-4 hover:text-primary">Terms of Service</a>{" "}
+            and{" "}
+            <a href="#" className="underline underline-offset-4 hover:text-primary">Privacy Policy</a>.
+          </div>
+        </motion.div>
+      </div>
     </div>
   );
 }

@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { auth, db, googleProvider } from "@/lib/firebase";
 import { signInWithPopup, signInWithRedirect, onAuthStateChanged } from "firebase/auth";
 import { ref as dbRef, get, set } from "firebase/database";
 import { Button } from "@/components/ui/button";
 
-export default function JoinProject() {
+function JoinProjectContent() {
     const searchParams = useSearchParams();
     const router = useRouter();
 
@@ -101,5 +101,13 @@ export default function JoinProject() {
                 )}
             </div>
         </div>
+    );
+}
+
+export default function JoinProject() {
+    return (
+        <Suspense fallback={<div className="p-8 text-center text-muted-foreground">Loading context...</div>}>
+            <JoinProjectContent />
+        </Suspense>
     );
 }

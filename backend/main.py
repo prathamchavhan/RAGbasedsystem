@@ -39,6 +39,43 @@ async def upload_pdf(
         )
 
 
+@app.post("/transcribe")
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    authorization: str = Header(None)
+):
+    from fastapi.responses import JSONResponse
+    import traceback
+    from rag import groq_client
+    try:
+        if not authorization or not authorization.startswith("Bearer "):
+            raise ValueError("Missing or invalid Authorization header")
+        
+        # Verify token just to check authorization, we don't strictly need uid here
+        from firebase_client import verify_token
+        token = authorization.split(" ", 1)[1]
+        verify_token(token)
+
+        # Groq needs a filename extension it recognizes for audio
+        filename = file.filename if file.filename else "audio.webm"
+        file_bytes = await file.read()
+        
+        transcription = groq_client.audio.transcriptions.create(
+            file=(filename, file_bytes),
+            model="whisper-large-v3-turbo",
+            response_format="json",
+        )
+        
+        return {"text": transcription.text}
+    except Exception as e:
+        print("--- ERROR IN /transcribe ---")
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "trace": traceback.format_exc()},
+        )
+
+
 @app.post("/ask")
 async def ask_question(
     payload: dict,

@@ -92,36 +92,41 @@ export default function PdfUploader({ projectId, uid, getToken, onUploadSuccess 
   const isUploading = progress.some((p) => p.status === "uploading" || p.status === "indexing");
 
   return (
-    <div className="space-y-3">
-      <label className="block">
-        <span className="text-xs text-muted-foreground mb-1 block">
+    <div className="space-y-4">
+      <label className="block group">
+        <span className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-widest block">
           Select one or more PDFs
         </span>
-        <input
-          type="file"
-          accept=".pdf"
-          multiple
-          onChange={handleFileChange}
-          className="block w-full text-sm text-muted-foreground
-            file:mr-3 file:py-1.5 file:px-3
-            file:rounded-md file:border-0
-            file:text-sm file:font-medium
-            file:bg-muted file:text-foreground
-            hover:file:bg-muted/70 cursor-pointer"
-        />
+        <div className="relative overflow-hidden rounded-xl border-2 border-dashed border-muted bg-card/50 hover:bg-muted/50 hover:border-primary/50 transition-all group-hover:shadow-[0_0_15px_rgba(99,102,241,0.1)]">
+          <input
+            type="file"
+            accept=".pdf"
+            multiple
+            onChange={handleFileChange}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+          />
+          <div className="flex flex-col items-center justify-center py-6 px-4 text-center pointer-events-none">
+            <span className="text-2xl mb-2 text-muted-foreground group-hover:text-primary transition-colors">📄</span>
+            <p className="text-sm font-medium text-foreground">Click to browse or drag and drop</p>
+            <p className="text-xs text-muted-foreground mt-1">PDF files only (max 10MB)</p>
+          </div>
+        </div>
       </label>
 
       {/* Unified file list — always visible once files are selected */}
       {files.length > 0 && (
-        <ul className="space-y-1 border rounded-md p-2 bg-muted/30">
+        <ul className="space-y-1.5 border rounded-xl p-2.5 bg-muted/20">
           {files.map((f, i) => {
             const p = progress[i];
             return (
-              <li key={f.name} className="text-xs flex items-center gap-2">
-                <span>{p ? statusIcon(p.status) : "📄"}</span>
-                <span className="truncate flex-1 font-medium" title={f.name}>{f.name}</span>
+              <li key={f.name} className="text-xs flex items-center gap-2.5 bg-card/80 px-3 py-2 rounded-lg border shadow-sm">
+                <span className="text-sm">{p ? statusIcon(p.status) : "📄"}</span>
+                <span className="truncate flex-1 font-medium text-card-foreground" title={f.name}>{f.name}</span>
                 {p ? (
-                  <span className="text-muted-foreground shrink-0">
+                  <span className={`text-[10px] uppercase tracking-widest font-bold shrink-0 ${p.status === "error" ? "text-destructive" :
+                    p.status === "done" ? "text-green-500" :
+                      "text-primary animate-pulse"
+                    }`}>
                     {p.status === "uploading" ? "Uploading..." :
                       p.status === "indexing" ? "Indexing..." :
                         p.status === "done" ? "Done!" :
@@ -130,7 +135,7 @@ export default function PdfUploader({ projectId, uid, getToken, onUploadSuccess 
                 ) : (
                   <button
                     onClick={() => setFiles(files.filter((_, idx) => idx !== i))}
-                    className="shrink-0 text-muted-foreground hover:text-red-500 transition font-bold"
+                    className="shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10 p-1 rounded-md transition-all font-bold focus:outline-none"
                     title="Remove from list"
                   >✕</button>
                 )}
@@ -141,19 +146,22 @@ export default function PdfUploader({ projectId, uid, getToken, onUploadSuccess 
       )}
 
       {done && (
-        <p className="text-xs text-green-600 font-medium">
+        <p className="text-xs text-green-500 font-medium bg-green-500/10 border border-green-500/20 px-3 py-2 rounded-lg text-center">
           ✅ All PDFs uploaded & indexed!
         </p>
       )}
-      {error && <p className="text-xs text-red-500">{error}</p>}
+      {error && <p className="text-xs text-destructive bg-destructive/10 border border-destructive/20 px-3 py-2 rounded-lg text-center break-words">{error}</p>}
 
       <Button
         onClick={handleUpload}
         disabled={!files.length || isUploading}
-        className="w-full"
+        className={`w-full h-11 rounded-xl text-sm font-semibold transition-all shadow-sm flex items-center justify-center ${!files.length || isUploading
+          ? "bg-muted text-muted-foreground border-none hover:bg-muted"
+          : "bg-primary hover:bg-primary/90 text-primary-foreground shadow-[0_0_15px_rgba(99,102,241,0.2)] hover:shadow-[0_0_20px_rgba(99,102,241,0.3)] hover:-translate-y-0.5"
+          }`}
       >
         {isUploading
-          ? `Uploading ${progress.filter(p => p.status === "done").length}/${files.length}...`
+          ? <span className="flex items-center gap-2"><span className="animate-spin">⏳</span> Uploading {progress.filter(p => p.status === "done").length}/{files.length}...</span>
           : files.length > 1
             ? `Upload ${files.length} PDFs`
             : "Upload PDF"}
