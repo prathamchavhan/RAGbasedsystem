@@ -211,9 +211,9 @@ export default function Dashboard() {
                 <div className="p-4 border-b flex items-center justify-between">
                     <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center shadow-inner">
-                            <span className="text-primary-foreground font-bold text-sm">S</span>
+                            <span className="text-primary-foreground font-bold text-sm">P</span>
                         </div>
-                        <span className="font-semibold text-sm tracking-tight text-foreground">Skipper AI</span>
+                        <span className="font-semibold text-sm tracking-tight text-foreground">PDF Chat</span>
                     </div>
                     <div className="flex items-center gap-2">
                         <ThemeToggle />
