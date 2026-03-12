@@ -4,7 +4,7 @@ A full-stack AI-powered PDF chatbot built with:
 
 **Next.js (Frontend)** + **Python FastAPI (Backend)** + **Firebase (Auth, Firestore, Storage)** + **LangChain + Gemini LLM**.
 
-## Features
+## Feature
 
 - 🔐 Google Sign-in via Firebase Auth
 - 📁 Project-based PDF management
