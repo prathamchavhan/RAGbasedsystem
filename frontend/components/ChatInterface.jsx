@@ -238,7 +238,7 @@ export default function ChatInterface({ projectId, uid, getToken, projectFiles, 
                 )}
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scroll-smooth">
+                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scroll-smooth chat-grid-bg">
                     {(!activeChatId || !activeChatId.id) && messages.length === 0 && (
                         <div className="space-y-6">
                             {activeChatId?.type === "group" ? (

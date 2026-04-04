@@ -287,7 +287,7 @@ export function ChatInput({
                 )}
             </div>
             <p className="text-center text-[10px] uppercase font-bold tracking-widest text-muted-foreground mt-4 mb-1">
-                Answers are based on your uploaded PDFs only
+                Answers are  based on your uploaded PDFs only
             </p>
         </div>
     );

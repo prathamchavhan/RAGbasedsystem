@@ -55,36 +55,46 @@ a {
     --ring: 0 0% 3.9%;
     --radius: 0.5rem;
   }
+
   .dark {
-    /* Custom dark theme based on #1a1915 */
-    --background: 48 11% 9%;
+    /* Pure black and white dark theme — no colors */
+    --background: 0 0% 4%;
     --foreground: 0 0% 98%;
-    --card: 48 11% 9%;
+    --card: 0 0% 7%;
     --card-foreground: 0 0% 98%;
-    --popover: 48 11% 9%;
+    --popover: 0 0% 7%;
     --popover-foreground: 0 0% 98%;
     --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 48 11% 15%;
+    --primary-foreground: 0 0% 4%;
+    --secondary: 0 0% 12%;
     --secondary-foreground: 0 0% 98%;
-    --muted: 48 11% 15%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 48 11% 15%;
+    --muted: 0 0% 12%;
+    --muted-foreground: 0 0% 55%;
+    --accent: 0 0% 15%;
     --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
+    --destructive: 0 0% 40%;
     --destructive-foreground: 0 0% 98%;
-    --border: 48 11% 15%;
-    --input: 48 11% 15%;
-    --ring: 0 0% 83.1%;
+    --border: 0 0% 16%;
+    --input: 0 0% 16%;
+    --ring: 0 0% 83%;
   }
 }
 
 
 
+.chat-grid-bg {
+  background-color: #0a0a0a;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
 @layer base {
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
   }

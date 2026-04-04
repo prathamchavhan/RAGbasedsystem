@@ -124,7 +124,7 @@ export default function Home() {
             <span className="text-2xl font-bold tracking-tight text-foreground">PDF Chat</span>
           </motion.div>
         </div>
-
+ 
         <div className="relative z-10 mt-auto mb-10">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
